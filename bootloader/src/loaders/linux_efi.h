@@ -1,0 +1,1 @@
+EFI_STATUS bootLinux(EFI_SYSTEM_TABLE *SystemTable, EFI_HANDLE ImageHandle);

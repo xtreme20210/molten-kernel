@@ -1,0 +1,11 @@
+build/
+kernel.o
+kernel.elf
+OVMF_VARS.fd
+.vscode
+/build
+BOOTX64.EFI
+vm/
+OVMF*
+esp/kernels/
+kernel.elf
