@@ -8,8 +8,9 @@ EFI_STATUS bootLinux(EFI_SYSTEM_TABLE *SystemTable, EFI_HANDLE ImageHandle) {
     EFI_HANDLE kernelHandle;
     EFI_LOADED_IMAGE *loadedImage;
     CHAR16 kernelArgs[] = L"initrd=\\kernels\\initrd.img root=/dev/mapper/ubuntu--vg-ubuntu--lv ro";
-    EFI_HANDLE deviceHandle = fsInit(ImageHandle, SystemTable);
-    EFI_DEVICE_PATH *devPath = FileDevicePath(deviceHandle, L"\\kernels\\linux.efi");
+    struct fs fsReturn;
+    fsReturn = fsInit(ImageHandle, SystemTable);
+    EFI_DEVICE_PATH *devPath = FileDevicePath(fsReturn.deviceHandle, L"\\kernels\\linux.efi");
     EFI_STATUS loadStatus = uefi_call_wrapper(
         SystemTable->BootServices->LoadImage, 6, FALSE, ImageHandle, devPath, NULL, 0, &kernelHandle
     );
