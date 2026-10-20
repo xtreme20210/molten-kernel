@@ -5,6 +5,15 @@
 #include "../uefi/filesystem.h"
 #include "handoff.h"
 
+struct frameBuffer {
+    uint64_t fbBase;
+    uint64_t fbSize;
+    uint32_t hRes;
+    uint32_t vRes;
+    uint32_t ppLine;
+    uint32_t pFormat;
+};
+
 EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     struct fs fsVars;
     fsVars = fsInit(ImageHandle, SystemTable);
@@ -129,6 +138,26 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     }
     stackAddress += (pages * 4096);
 
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *Protocol;
+    uefi_call_wrapper(
+        SystemTable->BootServices->LocateProtocol, 3, &GraphicsOutputProtocol, NULL, (VOID **)&Protocol
+    );
+    struct frameBuffer fbInfo;
+        fbInfo.fbBase = Protocol->Mode->FrameBufferBase;
+        fbInfo.fbSize = Protocol->Mode->FrameBufferSize;
+        fbInfo.hRes = Protocol->Mode->Info->HorizontalResolution;
+        fbInfo.vRes = Protocol->Mode->Info->VerticalResolution;
+        fbInfo.ppLine = Protocol->Mode->Info->PixelsPerScanLine;
+        fbInfo.pFormat = Protocol->Mode->Info->PixelFormat;
+
+    struct frameBuffer *fbPtr;
+
+    uefi_call_wrapper(
+        SystemTable->BootServices->AllocatePool, 3, EfiLoaderData, sizeof(fbInfo), (VOID **)&fbPtr
+    );
+    *fbPtr = fbInfo;
+
+
     UINTN memoryMapSize = 0;
     EFI_MEMORY_DESCRIPTOR *memoryMap =NULL;
     UINTN mapKey;
@@ -181,7 +210,6 @@ retry:
     }
 
     // the moment we've all been waiting for. the kernel takes over.
-    kernelHandoff(stackAddress, kernelHeader.e_entry);
-
+    kernelHandoff(stackAddress, kernelHeader.e_entry, fbPtr);
 }
 

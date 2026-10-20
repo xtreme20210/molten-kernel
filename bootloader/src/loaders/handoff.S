@@ -5,4 +5,5 @@ kernelHandoff:
 cli
 mov rsp, rdi
 sub rsp, 8
+mov rdi, rdx
 jmp rsi

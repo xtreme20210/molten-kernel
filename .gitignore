@@ -9,3 +9,4 @@ vm/
 OVMF*
 esp/kernels/
 kernel.elf
+test.txt
