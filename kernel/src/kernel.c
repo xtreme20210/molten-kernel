@@ -1,5 +1,7 @@
 #include <stdint.h>
+#include <x86intrin.h>
 #include "font.h"
+#include "scancodes.h"
 
 struct frameBuffer {
     uint64_t fbBase;
@@ -10,9 +12,22 @@ struct frameBuffer {
     uint32_t pFormat;
 };
 
+struct lineData {
+    uint32_t x;
+    uint32_t y;
+};
+
+struct lineData lines[100];
 volatile uint32_t *framebuffer;
-uint32_t cursorX = 25;
-uint32_t cursorY = 25;
+struct frameBuffer *fbPtr;
+bool shiftHeld = false;
+uint32_t lineCount = 0;
+uint32_t bColor = 0x004A0011;
+const uint32_t indentX = 25;
+const uint32_t indentY = 65;
+uint32_t cursorX = indentX;
+uint32_t cursorY = indentY;
+bool cursorFilled = false;
 
 void ioout(uint16_t port, uint8_t value) {
     __asm__ volatile (
@@ -22,12 +37,22 @@ void ioout(uint16_t port, uint8_t value) {
     );
 }
 
-void setColor(struct frameBuffer *fbPtr, uint32_t x, uint32_t y, uint32_t color) {
+uint8_t inb(uint16_t port) {
+    uint8_t result;
+    __asm__ volatile (
+        "inb %1, %0"
+        : "=a"(result)
+        : "Nd"(port)
+    );
+    return result;
+}
+
+void setColor(uint32_t x, uint32_t y, uint32_t color) {
     uint32_t pLocation = (x + y * fbPtr->ppLine);
     framebuffer[pLocation] = color;
 }
 
-void fill(struct frameBuffer *fbPtr, uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color) {
+void fill(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color) {
     if (x1 > x2) {
         uint32_t temp = x1;
         x1 = x2;
@@ -45,40 +70,114 @@ void fill(struct frameBuffer *fbPtr, uint32_t x1, uint32_t y1, uint32_t x2, uint
     }
 }
 
-void drawChar(struct frameBuffer *fbPtr, unsigned char character, uint32_t x, uint32_t y, uint32_t color, uint8_t scale) {
+void drawChar(unsigned char character, uint32_t x, uint32_t y, uint32_t color, uint8_t scale) {
     for (int i = 0; i < 8; i++) {
         uint8_t row = font8x8_basic[character][i];
         for (int ix = 0; ix < 8; ix++) {
             if (row & (1 << ix)) {
-                fill(fbPtr, (ix*scale + x), (i*scale + y), (ix*scale + x + scale), (i*scale + y + scale), color);
+                fill((ix*scale + x), (i*scale + y), (ix*scale + x + scale), (i*scale + y + scale), color);
             }
         }
     }
 }
 
-void drawString(struct frameBuffer *fbPtr, const char *string, uint32_t x, uint32_t y, uint32_t color, uint8_t scale) {
+void drawString(const char *string, uint32_t x, uint32_t y, uint32_t color, uint8_t scale) {
     uint32_t xog = x;
     for (int i = 0; string[i] != '\0'; i++) {
-        drawChar(fbPtr, string[i], x, y, color, scale);
+        drawChar(string[i], x, y, color, scale);
         x += 8*scale;
     }
 }
 
-void cout(struct frameBuffer *fbPtr, const char *string) {
+void coutChar(char character) {
+    if (character == '\n' || (cursorX + 8) > fbPtr->hRes) {
+        fill(cursorX, cursorY, cursorX+8, cursorY+8, bColor);
+        lines[lineCount].x = cursorX;
+        lines[lineCount].y = cursorY;
+        cursorX = indentX;
+        cursorY += 10;
+        lineCount++;
+        if (character == '\n') {
+            return;
+        }
+    }
+    fill(cursorX, cursorY, cursorX+8, cursorY+8, bColor);
+    drawChar(character, cursorX, cursorY, 0x00000000, 1);
+    cursorX += 8;
+}
+
+void cout(const char *string) {
     for (int i = 0; string[i] != '\0'; i++) {
         if (string[i] == '\n' || (cursorX + 8) > fbPtr->hRes) {
-            cursorX = 0;
+            lines[lineCount].x = cursorX;
+            lines[lineCount].y = cursorY;
+            cursorX = indentX;
             cursorY += 10;
+            lineCount++;
             if (string[i] == '\n') {
                 continue;
             }
         }
-        drawChar(fbPtr, string[i], cursorX, cursorY, 0x00000000, 1);
+        drawChar(string[i], cursorX, cursorY, 0x00000000, 1);
         cursorX += 8;
     }
 }
 
-void kernel_main(struct frameBuffer *fbPtr) {
+void printHex(uint8_t input) {
+    const char hex[] = "0123456789ABCDEF";
+    char print[3];
+    print[0] = hex[input >> 4];
+    print[1] = hex[input & 0x0F];
+    print[2] = '\0';
+    cout(print);
+}
+
+void ps2Poll() {
+    uint8_t ps2Status = inb(0x64);
+    if (ps2Status & 0x01) {
+        uint8_t ps2Code = inb(0x60);
+        if (ps2Code == 0x2A) {
+            shiftHeld = true;
+        } else if (ps2Code == 0xAA) {
+            shiftHeld = false;
+        }
+        if (ps2Code == 0x0E) {
+            if (cursorX == indentX && cursorY > 8 && lineCount >0) {
+                fill(cursorX+8, cursorY, cursorX-8, cursorY+8, bColor);
+                lineCount--;
+                cursorX = lines[lineCount].x;
+                cursorY = lines[lineCount].y;
+            } else if (cursorX >= (indentX+8)) {
+                fill(cursorX-8, cursorY, cursorX+8, cursorY+8, bColor);
+                cursorX -= 8;
+            }
+        }
+        if ((ps2Code >> 7) == 0 && scToAscii[ps2Code] != '\0') {
+            if (shiftHeld == true) {
+                coutChar(scToAsciiShifted[ps2Code]);
+            } else {
+                coutChar(scToAscii[ps2Code]);
+            }
+        }
+    }
+}
+
+void cursorBlink() {
+    if ((__rdtsc() % 2000000000ULL) > 1000000000ULL) {
+        if (!cursorFilled) {
+            fill(cursorX, cursorY, cursorX + 8, cursorY + 8, 0x00000000);
+        }
+        cursorFilled = true;
+    } else {
+        if (cursorFilled) {
+            fill(cursorX, cursorY, cursorX+8, cursorY+8, bColor);
+        }
+        cursorFilled = false;
+    }
+}
+
+void kernel_main(struct frameBuffer *bootfbPtr) {
+    fbPtr = bootfbPtr;
     ioout(0x3F9, 0x00);
     ioout(0xF3B, 0x80);
     ioout(0xF38, 0x01);
@@ -90,16 +189,24 @@ void kernel_main(struct frameBuffer *fbPtr) {
 
     framebuffer = (volatile uint32_t *)(uintptr_t)fbPtr->fbBase;
     for (int i = 0; i < (fbPtr->fbSize / 4); i++) {
-        if (fbPtr->pFormat = 1) {
-            framebuffer[i] = 0x004A0011;
+        if (fbPtr->pFormat == 1) {
+            framebuffer[i] = bColor;
         }
-        if (fbPtr->pFormat = 0) {
-            framebuffer[i] = 0x004A0011;
+        if (fbPtr->pFormat == 0) {
+            framebuffer[i] = bColor;
         }
-
     }
-    cout(fbPtr, "Welcome to Molten kernel!\n");
-    while (1) {
+    drawString("Welcome to Molten kernel!", 25, 25, 0x00000000, 2);
 
+    uint8_t ps2Status = inb(0x64);
+    uint8_t input;
+    if (ps2Status == 0) {
+        input = inb(0x60);
+    }
+
+
+    while (1) {
+        ps2Poll();
+        cursorBlink();
     }
 }
