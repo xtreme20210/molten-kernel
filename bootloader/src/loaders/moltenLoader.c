@@ -14,6 +14,15 @@ struct frameBuffer {
     uint32_t pFormat;
 };
 
+struct bootInfo {
+    struct frameBuffer fbInfo;
+
+    void *memoryMap;
+    uint64_t memoryMapSize;
+    uint64_t descriptorSize;
+    uint32_t descriptorVersion;
+};
+
 EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     struct fs fsVars;
     fsVars = fsInit(ImageHandle, SystemTable);
@@ -150,6 +159,7 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         fbInfo.ppLine = Protocol->Mode->Info->PixelsPerScanLine;
         fbInfo.pFormat = Protocol->Mode->Info->PixelFormat;
 
+
     struct frameBuffer *fbPtr;
 
     uefi_call_wrapper(
@@ -158,6 +168,12 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     *fbPtr = fbInfo;
 
 
+    struct bootInfo *info;
+    uefi_call_wrapper(
+        SystemTable->BootServices->AllocatePool, 3, EfiLoaderData, sizeof(*info), (VOID **)&info
+    );
+    info->fbInfo = fbInfo;
+    
     UINTN memoryMapSize = 0;
     EFI_MEMORY_DESCRIPTOR *memoryMap =NULL;
     UINTN mapKey;
@@ -191,6 +207,11 @@ retry:
         return EFI_LOAD_ERROR;
     }
 
+    info->memoryMap = memoryMap;
+    info->memoryMapSize = memoryMapSize;
+    info->descriptorSize = descriptorSize;
+    info->descriptorVersion = descriptorVersion;
+
     // no more efi! 
     if (retryCounter == 0) {
         Print(L"exiting boot services...\r\n");
@@ -210,6 +231,6 @@ retry:
     }
 
     // the moment we've all been waiting for. the kernel takes over.
-    kernelHandoff(stackAddress, kernelHeader.e_entry, fbPtr);
+    kernelHandoff(stackAddress, kernelHeader.e_entry, info);
 }
 

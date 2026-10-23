@@ -3,6 +3,15 @@
 #include "font.h"
 #include "scancodes.h"
 
+typedef struct {
+    uint32_t Type;
+    uint32_t Padding;
+    uint64_t PhysicalStart;
+    uint64_t VirtualStart;
+    uint64_t NumberOfPages;
+    uint64_t Attribute;
+} MemoryDescriptor;
+
 struct frameBuffer {
     uint64_t fbBase;
     uint64_t fbSize;
@@ -17,6 +26,15 @@ struct lineData {
     uint32_t y;
 };
 
+struct bootInfo {
+    struct frameBuffer fbInfo;
+
+    void *memoryMap;
+    uint64_t memoryMapSize;
+    uint64_t descriptorSize;
+    uint32_t descriptorVersion;
+};
+
 struct lineData lines[100];
 volatile uint32_t *framebuffer;
 struct frameBuffer *fbPtr;
@@ -28,6 +46,8 @@ const uint32_t indentY = 65;
 uint32_t cursorX = indentX;
 uint32_t cursorY = indentY;
 bool cursorFilled = false;
+uint64_t usablePages = 0;
+
 
 void ioout(uint16_t port, uint8_t value) {
     __asm__ volatile (
@@ -63,8 +83,8 @@ void fill(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color) {
         y1 = y2;
         y2 = temp;
     }
-    for (int yi = (y1 * fbPtr->ppLine); yi <= (y2 * fbPtr->ppLine); yi += fbPtr->ppLine) {
-        for (int xi = x1; xi <= x2; xi++) {
+    for (int yi = (y1 * fbPtr->ppLine); yi < (y2 * fbPtr->ppLine); yi += fbPtr->ppLine) {
+        for (int xi = x1; xi < x2; xi++) {
             framebuffer[yi + xi] = color;
         }
     }
@@ -82,7 +102,6 @@ void drawChar(unsigned char character, uint32_t x, uint32_t y, uint32_t color, u
 }
 
 void drawString(const char *string, uint32_t x, uint32_t y, uint32_t color, uint8_t scale) {
-    uint32_t xog = x;
     for (int i = 0; string[i] != '\0'; i++) {
         drawChar(string[i], x, y, color, scale);
         x += 8*scale;
@@ -123,12 +142,14 @@ void cout(const char *string) {
     }
 }
 
-void printHex(uint8_t input) {
+void printHex(uint64_t input) {
     const char hex[] = "0123456789ABCDEF";
-    char print[3];
-    print[0] = hex[input >> 4];
-    print[1] = hex[input & 0x0F];
-    print[2] = '\0';
+    char print[17];
+    for (int i=0; i<16; i++) {
+        print[i] = hex[input >> 60 - i*4 & 0x0F];
+    }
+
+    print[16] = '\0';
     cout(print);
 }
 
@@ -176,34 +197,87 @@ void cursorBlink() {
     }
 }
 
-void kernel_main(struct frameBuffer *bootfbPtr) {
-    fbPtr = bootfbPtr;
-    ioout(0x3F9, 0x00);
-    ioout(0xF3B, 0x80);
-    ioout(0xF38, 0x01);
-    ioout(0xF39, 0x00);
-    ioout(0xF3B, 0x03);
-    ioout(0xF3A, 0xC7);
-    ioout(0x3FC, 0x03);
-    ioout(0x3F8, 'A');
+bool pageAvaliable(uint64_t pageNumber, uint8_t *bitmap) {
+    uint64_t byteIndex = pageNumber/8;
+    uint8_t bitIndex = pageNumber%8;
+
+    if (bitmap[byteIndex] & (0x01 << bitIndex)) {
+        return false;
+    } 
+    return true;
+}
+
+uint8_t * memInit(struct bootInfo *bootInfoPtr) {
+    uint64_t endPage = 0;
+    uint64_t bitmapAddress = 0;
+    uint64_t bitmapPage = 0;
+    for (int i=0; i < bootInfoPtr->memoryMapSize / bootInfoPtr->descriptorSize; i++ ) {
+        uint8_t *address = bootInfoPtr->memoryMap;
+        address += (i * bootInfoPtr->descriptorSize);
+        MemoryDescriptor *descriptor = (MemoryDescriptor *)address;
+
+        if (descriptor->Type == 7) {
+            uint64_t lastPage = descriptor->PhysicalStart / 4096 + descriptor->NumberOfPages;
+            usablePages += descriptor->NumberOfPages;
+            if (lastPage > endPage) {
+                endPage = lastPage;
+            }
+            if (descriptor->NumberOfPages > 48) {
+                bitmapAddress = descriptor->PhysicalStart + ((descriptor->NumberOfPages - 48)*4096);
+                bitmapPage = lastPage -48;
+            }
+        }
+    }
+
+    uint64_t bitmapSize = (endPage+7)/8;
+    uint8_t *bitmap = (uint8_t *)(uintptr_t)bitmapAddress;
+    for (uint64_t i = 0; i < bitmapSize; i++) {
+        bitmap[i]=0xFF;
+    }
+
+    for (uint64_t i=0; i < bootInfoPtr->memoryMapSize / bootInfoPtr->descriptorSize; i++ ) {
+        uint8_t *address = bootInfoPtr->memoryMap;
+        address += (i * bootInfoPtr->descriptorSize);
+        MemoryDescriptor *descriptor = (MemoryDescriptor *)address;
+        if (descriptor->Type == 7) {
+            for (uint64_t ii=0; ii<descriptor->NumberOfPages; ii++) {
+                uint64_t page = descriptor->PhysicalStart / 4096 + ii;
+                bitmap[page/8] &= ~(1 << page%8);
+            }
+        }
+    }
+
+    for (int i=0; i < 48; i++) {
+        uint64_t page = bitmapPage + i;
+        bitmap[page/8] |= (1 << page%8);
+    }
+
+    printHex(usablePages * 4096);
+    cout("\nendPage = ");
+    printHex(endPage);
+    cout("\nbitmap size = ");
+    printHex((endPage+7)/8);
+    if(pageAvaliable(bitmapPage, bitmap)) {
+        cout("\npage avaliable :(\n");
+    } else {cout("\npage reserved :)\n");}
+    if(pageAvaliable(bitmapPage+47, bitmap)) {
+        cout("page avaliable :(\n");
+    } else {cout("page reserved :)\n");}
+    return bitmap;
+}
+
+void kernel_main(struct bootInfo *bootInfoPtr) {
+    fbPtr = &bootInfoPtr->fbInfo;
 
     framebuffer = (volatile uint32_t *)(uintptr_t)fbPtr->fbBase;
     for (int i = 0; i < (fbPtr->fbSize / 4); i++) {
-        if (fbPtr->pFormat == 1) {
-            framebuffer[i] = bColor;
-        }
-        if (fbPtr->pFormat == 0) {
-            framebuffer[i] = bColor;
-        }
+        framebuffer[i] = bColor;
     }
+
     drawString("Welcome to Molten kernel!", 25, 25, 0x00000000, 2);
 
-    uint8_t ps2Status = inb(0x64);
-    uint8_t input;
-    if (ps2Status == 0) {
-        input = inb(0x60);
-    }
-
+    uint8_t *bitmap = memInit(bootInfoPtr);
+    
 
     while (1) {
         ps2Poll();
