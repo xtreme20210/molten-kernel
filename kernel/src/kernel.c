@@ -5,6 +5,7 @@
 #include "memory.h"
 #include "rendering.h"
 #include "structs.h"
+#include "paging.h"
 
 bool shiftHeld = false;
 
@@ -58,26 +59,17 @@ void kernel_main(struct bootInfo *bootInfoPtr) {
     drawString("Welcome to Molten kernel!", 25, 25, 0x00000000, 2);
 
     cout("initializing memory...\n");
-    struct memInfo memInitInfo;
-    memInitInfo = memInit(bootInfoPtr);
-
-    if (memInitInfo.bitmap == NULL) {
-        cout("memory initialization failed\n");
-    } else {
-        if (pageAvaliable(0, memInitInfo.bitmap)) {
-            cout("memory initialization failed\n");
+    memInit(bootInfoPtr);
+    cout("initializing virtual memory...\n");
+    bool success = vmemInit();
+    if (success == true) {
+        cout("virtual memory initialized, mapping test...");
+        void *physicalPage = allocPage(1);
+        bool mapSuccess = mapPage(0x40000000, (uint64_t)(uintptr_t)physicalPage);
+        if (mapSuccess == true) {
+            cout("mapPage success!");
         } else {
-            void *memPtr = allocPage(1, memInitInfo.bitmap, memInitInfo.endPage);
-            if(memPtr == NULL || pageAvaliable((uintptr_t)memPtr / 4096, memInitInfo.bitmap)) {
-                cout("memory initialization failed\n");
-            } else {
-                freePage(&memInitInfo, memPtr, 1);
-                if(memPtr == NULL || !pageAvaliable((uintptr_t)memPtr / 4096, memInitInfo.bitmap) || pageAvaliable(0, memInitInfo.bitmap)) {
-                    cout("memory intialization failed\n");
-                } else {
-                    cout("memory initialized\n");
-                }
-            }
+            cout("mapPage failed");
         }
     }
 

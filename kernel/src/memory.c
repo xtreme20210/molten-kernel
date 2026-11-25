@@ -6,6 +6,8 @@
 #include "structs.h"
 #include "rendering.h"
 
+static struct memInfo memory;
+
 uint64_t usablePages = 0;
 
 bool pageAvaliable(uint64_t pageNumber, uint8_t *bitmap) {
@@ -18,7 +20,7 @@ bool pageAvaliable(uint64_t pageNumber, uint8_t *bitmap) {
     return true;
 }
 
-struct memInfo memInit(struct bootInfo *bootInfoPtr) {
+void memInit(struct bootInfo *bootInfoPtr) {
     uint64_t endPage = 0;
     uint64_t bitmapAddress = 0;
     uint64_t bitmapPage = 0;
@@ -56,7 +58,7 @@ struct memInfo memInit(struct bootInfo *bootInfoPtr) {
         memInitFailed.bitmap = NULL;
         memInitFailed.bitmapPages = 0;
         memInitFailed.endPage = 0;
-        return memInitFailed;
+        return;
     }
 
     uint8_t *bitmap = (uint8_t *)(uintptr_t)bitmapAddress;
@@ -83,25 +85,24 @@ struct memInfo memInit(struct bootInfo *bootInfoPtr) {
 
     bitmap[0] |= 1;
     struct memInfo initMemInfo;
-    initMemInfo.bitmap = bitmap;
-    initMemInfo.bitmapPages = bitmapPages;
-    initMemInfo.endPage = endPage;
-    return initMemInfo;
+    memory.bitmap = bitmap;
+    memory.bitmapPages = bitmapPages;
+    memory.endPage = endPage;
 }
 
-void *allocPage(uint64_t number, uint8_t *bitmap, uint64_t endPage) {
+void *allocPage(uint64_t number) {
     if(number == 0) {
         cout("you cannot allocate 0 pages\n");
         return NULL;
     }
-    if(number > endPage) {
+    if(number > memory.endPage) {
         cout("you cannot allocate more memory than the system has free\n");
         return NULL;
     }
-    for (uint64_t i=1; i+number <= endPage; i++) {
+    for (uint64_t i=1; i+number <= memory.endPage; i++) {
         bool sectionValid = true;
         for (uint64_t ii=0; ii < number; ii++) {
-            bool avaliable = pageAvaliable(i + ii, bitmap);
+            bool avaliable = pageAvaliable(i + ii, memory.bitmap);
             if (!avaliable) {
                 sectionValid = false;
                 break;
@@ -109,7 +110,7 @@ void *allocPage(uint64_t number, uint8_t *bitmap, uint64_t endPage) {
         }
         if (sectionValid) {
             for (uint64_t ii = 0; ii < number; ii++)
-            bitmap[(i+ii)/8] |= (1 << (i+ii)%8);
+            memory.bitmap[(i+ii)/8] |= (1 << (i+ii)%8);
             return (void *)(uintptr_t)(i*4096);
         }
     }
@@ -117,7 +118,7 @@ void *allocPage(uint64_t number, uint8_t *bitmap, uint64_t endPage) {
     return NULL;
 }
 
-void freePage(struct memInfo *mem, void *address, uint64_t number) {
+void freePage(void *address, uint64_t number) {
     uint64_t pageNumber = (uintptr_t)address/4096;
     if(number == 0) {
         cout("you cannot free 0 pages\n");
@@ -131,12 +132,12 @@ void freePage(struct memInfo *mem, void *address, uint64_t number) {
         cout("you cannot free a null address\n");
         return;
     }
-    if (pageNumber > mem->endPage || number > mem->endPage - pageNumber) {
+    if (pageNumber > memory.endPage || number > memory.endPage - pageNumber) {
         cout("outside memory bounds\n");
         return;
     }
     for (uint64_t i = pageNumber; i < pageNumber+number; i++) {
-        mem->bitmap[i/8] &= ~(1 << i%8);
+        memory.bitmap[i/8] &= ~(1 << i%8);
     }
     return;
 }

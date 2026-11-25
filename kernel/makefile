@@ -5,6 +5,7 @@ ELFTARGET = build/kernel.elf
 LINKER = kernel.ld
 MEMTARGET = build/memory.o
 RTARGET = build/rendering.o
+PTARGET = build/paging.c
 
 all: $(ELFTARGET)
 
@@ -18,8 +19,11 @@ $(MEMTARGET): src/memory.c
 $(RTARGET): src/rendering.c
 	$(CC) $(CFLAGS) src/rendering.c -o $(RTARGET)
 
-$(ELFTARGET): $(TARGET) $(LINKER) $(MEMTARGET) $(RTARGET)
-	ld -m elf_x86_64 -T $(LINKER) -o $(ELFTARGET) $(TARGET) $(MEMTARGET) $(RTARGET)
+$(PTARGET): src/paging.c
+	$(CC) $(CFLAGS) src/paging.c -o $(PTARGET)
+
+$(ELFTARGET): $(TARGET) $(LINKER) $(MEMTARGET) $(RTARGET) $(PTARGET)
+	ld -m elf_x86_64 -T $(LINKER) -o $(ELFTARGET) $(TARGET) $(MEMTARGET) $(RTARGET) $(PTARGET)
 	cp $(ELFTARGET) /home/willf/Documents/code/molten/bootloader/esp/EFI/molten/kernel.elf
 
 clean:
