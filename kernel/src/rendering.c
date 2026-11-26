@@ -17,6 +17,10 @@ uint32_t bColor = 0x004A0011;
 struct lineData lines[100];
 bool cursorFilled = false;
 
+struct frameBuffer *getfbPtr() {
+    return fbPtr;
+}
+
 struct renderInfo renderInit(struct bootInfo *bootInfo) {
     struct renderInfo initRenderInfo;
     initRenderInfo.fbPtr = &bootInfo->fbInfo;

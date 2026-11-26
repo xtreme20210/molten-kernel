@@ -5,7 +5,7 @@ ELFTARGET = build/kernel.elf
 LINKER = kernel.ld
 MEMTARGET = build/memory.o
 RTARGET = build/rendering.o
-PTARGET = build/paging.c
+PTARGET = build/paging.o
 
 all: $(ELFTARGET)
 

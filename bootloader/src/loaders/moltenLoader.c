@@ -14,8 +14,18 @@ struct frameBuffer {
     uint32_t pFormat;
 };
 
+struct kernelSegment {
+    uint64_t physicalAddress;
+    uint64_t virtualAddress;
+    uint64_t size;
+};
+
 struct bootInfo {
     struct frameBuffer fbInfo;
+    struct kernelSegment kSegment[16];
+    uint64_t kernelSegmentCount;
+    uint64_t stackBase;
+    uint64_t stackSize;
 
     void *memoryMap;
     uint64_t memoryMapSize;
@@ -83,6 +93,12 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         return EFI_INVALID_PARAMETER;
     }
 
+    struct bootInfo *info;
+        uefi_call_wrapper(
+        SystemTable->BootServices->AllocatePool, 3, EfiLoaderData, sizeof(*info), (VOID **)&info
+    );
+    info->kernelSegmentCount = 0;
+
     for (int i=0; i<kernelHeader.e_phnum; i++) {
 
         uefi_call_wrapper(
@@ -114,6 +130,10 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
             }
             Print(L"successfully allocated memory\r\n");
 
+            info->kSegment[info->kernelSegmentCount].physicalAddress = header.p_paddr;
+            info->kSegment[info->kernelSegmentCount].virtualAddress = header.p_vaddr;
+            info->kSegment[info->kernelSegmentCount].size = header.p_memsz;
+
             UINTN amountRead = header.p_filesz;
 
             uefi_call_wrapper(
@@ -133,6 +153,7 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
                 );
             }
             Print(L"loaded segment into memory\r\n");
+            info->kernelSegmentCount++;
         }
     }
 
@@ -145,6 +166,9 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         Print(L"error allocating stack\r\n");
         return EFI_LOAD_ERROR;
     }
+    Print(L"stack base: 0x%lx\r\n", stackAddress);
+    info->stackBase = stackAddress;
+    info->stackSize = pages * 4096;
     stackAddress += (pages * 4096);
 
     EFI_GRAPHICS_OUTPUT_PROTOCOL *Protocol;
@@ -167,11 +191,6 @@ EFI_STATUS loadMolten(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     );
     *fbPtr = fbInfo;
 
-
-    struct bootInfo *info;
-    uefi_call_wrapper(
-        SystemTable->BootServices->AllocatePool, 3, EfiLoaderData, sizeof(*info), (VOID **)&info
-    );
     info->fbInfo = fbInfo;
     
     UINTN memoryMapSize = 0;

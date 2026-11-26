@@ -13,3 +13,4 @@ void cout(const char *string);
 void printHex(uint64_t input);
 void cursorBlink();
 void backspace();
+struct frameBuffer *getfbPtr();

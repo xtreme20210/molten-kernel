@@ -8,6 +8,10 @@
 
 static struct memInfo memory;
 
+struct memInfo getMemory() {
+    return memory;
+}
+
 uint64_t usablePages = 0;
 
 bool pageAvaliable(uint64_t pageNumber, uint8_t *bitmap) {

@@ -37,11 +37,26 @@ struct lineData {
     uint32_t y;
 };
 
+struct kernelSegment {
+    uint64_t physicalAddress;
+    uint64_t virtualAddress;
+    uint64_t size;
+};
+
 struct bootInfo {
     struct frameBuffer fbInfo;
+    struct kernelSegment kSegment[16];
+    uint64_t kernelSegmentCount;
+    uint64_t stackBase;
+    uint64_t stackSize;
 
     void *memoryMap;
     uint64_t memoryMapSize;
     uint64_t descriptorSize;
     uint32_t descriptorVersion;
+};
+
+struct __attribute__((packed)) descriptorTableRegister {
+    uint16_t limit;
+    uint64_t base;
 };
